@@ -1,15 +1,16 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 2,
   "name": "ChatGPT ターン書き出し（PNG）",
   "version": "0.1.0",
   "description": "選択したChatGPTのターン（ユーザー＋アシスタント）をPNG画像として一覧タブに表示します。",
-  "permissions": ["storage", "tabs"],
-  "host_permissions": [
+  "permissions": [
+    "storage",
+    "tabs",
     "https://chatgpt.com/*",
     "https://chat.openai.com/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "scripts": ["background.js"]
   },
   "options_ui": {
     "page": "options/options.html",
