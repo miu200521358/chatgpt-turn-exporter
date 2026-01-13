@@ -7,6 +7,47 @@
   const STORAGE_PROFILES = "cgexport_profiles_v1";
   const STORAGE_ACTIVE = "cgexport_active_profile_id_v1";
 
+  const THEME_PRESETS = {
+    "gpt-red": {
+      label: "赤",
+      gptBg: "#ffd6d6",
+      userBg: "#d9f5ff"
+    },
+    "gpt-orange": {
+      label: "橙",
+      gptBg: "#ffe1c4",
+      userBg: "#d6e4ff"
+    },
+    "gpt-yellow": {
+      label: "黄",
+      gptBg: "#fff4c2",
+      userBg: "#e3dcff"
+    },
+    "gpt-green": {
+      label: "緑",
+      gptBg: "#dff5e1",
+      userBg: "#f8dbe8"
+    },
+    "gpt-blue": {
+      label: "青",
+      gptBg: "#dbe9ff",
+      userBg: "#fff3cc"
+    },
+    "gpt-indigo": {
+      label: "藍",
+      gptBg: "#e1dcff",
+      userBg: "#ffe6bf"
+    },
+    "gpt-violet": {
+      label: "紫",
+      gptBg: "#f0dcff",
+      userBg: "#e7f5cf"
+    }
+  };
+  const DEFAULT_THEME_ID = "gpt-green";
+  const DEFAULT_USER_NAME = "ユーザー";
+  const DEFAULT_GPT_NAME = "GPT";
+
   const state = {
     profiles: [],
     activeProfileId: null,
@@ -16,7 +57,9 @@
     selectionEnabled: false,
     lastSyncAt: 0,
     syncScheduled: false,
-    fallbackCount: 0
+    fallbackCount: 0,
+    textFallbackCount: 0,
+    requestTimestamp: ""
   };
 
   document.documentElement.classList.add("cgexport-selection-off");
@@ -60,7 +103,10 @@
       maskWords: [],
       maskCaseInsensitive: false,
       themeColor: "#0b1220",
-      widthPx: 980,
+      themeId: DEFAULT_THEME_ID,
+      userName: DEFAULT_USER_NAME,
+      gptName: DEFAULT_GPT_NAME,
+      widthPx: 360,
       paddingPx: 24,
       scale: 2
     };
@@ -297,6 +343,8 @@
     }
 
     state.fallbackCount = 0;
+    state.textFallbackCount = 0;
+    state.requestTimestamp = formatRequestTimestamp(new Date());
     setMeta(`表示タブを開いています… (${selected.length}件)`);
     const { sessionId } = await browser.runtime.sendMessage({ type: "cgexport_open_viewer" });
 
@@ -307,7 +355,7 @@
     for (let i = 0; i < selected.length; i++) {
       setMeta(`描画中… ${i + 1}/${selected.length}`);
       const buf = await renderTurnToPngBuffer(selected[i], profile);
-      const filename = buildFileName(profile, i + 1);
+      const filename = buildFileName(i + 1);
       await browser.runtime.sendMessage({
         type: "cgexport_add_image",
         sessionId,
@@ -317,16 +365,26 @@
     }
 
     await browser.runtime.sendMessage({ type: "cgexport_export_done", sessionId });
-    if (state.fallbackCount > 0) {
-      setMeta(`完了: ${selected.length}件（${state.fallbackCount}件は画像/背景を除外）`);
-    } else {
-      setMeta(`完了: ${selected.length}件`);
-    }
+    const notes = [];
+    if (state.fallbackCount > 0) notes.push(`画像/背景を除外: ${state.fallbackCount}件`);
+    if (state.textFallbackCount > 0) notes.push(`テキストのみ: ${state.textFallbackCount}件`);
+    if (notes.length > 0) setMeta(`完了: ${selected.length}件（${notes.join(" / ")}）`);
+    else setMeta(`完了: ${selected.length}件`);
   }
 
-  function buildFileName(profile, index) {
-    const base = (profile?.name || "chatgpt").replace(/[^\w\-]+/g, "_").slice(0, 32);
-    return `${base}_turn_${String(index).padStart(3, "0")}.png`;
+  function formatRequestTimestamp(date) {
+    const d = date instanceof Date ? date : new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    const h = String(d.getHours()).padStart(2, "0");
+    const min = String(d.getMinutes()).padStart(2, "0");
+    return `${y}${m}${day}${h}${min}`;
+  }
+
+  function buildFileName(index) {
+    const stamp = state.requestTimestamp || formatRequestTimestamp(new Date());
+    return `${stamp}_${index}.png`;
   }
 
   function waitForViewerReady(sessionId, timeoutMs = 15000) {
@@ -396,6 +454,80 @@
     }
   }
 
+  function resolveThemeColors(profile) {
+    if (profile?.userBgColor || profile?.gptBgColor) {
+      return {
+        userBg: profile.userBgColor || THEME_PRESETS[DEFAULT_THEME_ID].userBg,
+        gptBg: profile.gptBgColor || THEME_PRESETS[DEFAULT_THEME_ID].gptBg
+      };
+    }
+
+    const themeId = profile?.themeId;
+    if (themeId && THEME_PRESETS[themeId]) return THEME_PRESETS[themeId];
+    return THEME_PRESETS[DEFAULT_THEME_ID];
+  }
+
+  function applyTurnBackground(root, color) {
+    if (!root || !color) return;
+    root.style.background = color;
+    root.style.borderRadius = "14px";
+    root.style.padding = "10px 12px";
+    root.style.boxSizing = "border-box";
+  }
+
+  function extractTextFromNode(node, profile) {
+    if (!node) return "";
+    const sandbox = getSandbox();
+    const clone = node.cloneNode(true);
+    removeExporterUI(clone);
+    applyMask(clone, profile);
+    stripMediaElements(clone);
+    sandbox.appendChild(clone);
+    let text = "";
+    try {
+      text = clone.innerText || clone.textContent || "";
+    } finally {
+      if (clone.parentNode === sandbox) sandbox.removeChild(clone);
+    }
+    return String(text).trim();
+  }
+
+  function wrapTextLines(ctx, text, maxWidth) {
+    const lines = [];
+    const paragraphs = String(text || "").split(/\n/);
+    for (const para of paragraphs) {
+      if (para.length === 0) {
+        lines.push("");
+        continue;
+      }
+      let line = "";
+      for (const ch of para) {
+        const test = line + ch;
+        if (ctx.measureText(test).width > maxWidth && line.length > 0) {
+          lines.push(line);
+          line = ch;
+        } else {
+          line = test;
+        }
+      }
+      lines.push(line);
+    }
+    return lines;
+  }
+
+  function drawRoundedRect(ctx, x, y, w, h, r, fill) {
+    const radius = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.arcTo(x + w, y, x + w, y + h, radius);
+    ctx.arcTo(x + w, y + h, x, y + h, radius);
+    ctx.arcTo(x, y + h, x, y, radius);
+    ctx.arcTo(x, y, x + w, y, radius);
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+  }
+
   async function waitImagesLoaded(root, timeoutMs = 4000) {
     const imgs = Array.from(root.querySelectorAll("img"));
     if (imgs.length === 0) return;
@@ -455,6 +587,10 @@
     applyMask(userClone, profile);
     applyMask(assistantWrap, profile);
 
+    const theme = resolveThemeColors(profile);
+    applyTurnBackground(userClone, theme.userBg);
+    applyTurnBackground(assistantWrap, theme.gptBg);
+
     if (options?.stripMedia) {
       stripMediaElements(userClone);
       stripMediaElements(assistantWrap);
@@ -488,6 +624,92 @@
     });
   }
 
+  function resolveProfileName(value, fallback) {
+    const v = String(value ?? "").trim();
+    return v.length > 0 ? v : fallback;
+  }
+
+  function buildLabeledText(name, body) {
+    const title = String(name ?? "").trim();
+    const text = String(body ?? "").trim();
+    if (title && text) return `${title}\n\n${text}`;
+    if (title) return title;
+    return text;
+  }
+
+  async function renderTurnToTextPngBuffer(turn, profile) {
+    const theme = resolveThemeColors(profile);
+    const width = Number(profile.widthPx || 980);
+    const padding = Number(profile.paddingPx || 24);
+    const gap = 12;
+    const fontSize = Math.max(15, Math.min(18, Math.round(width * 0.047)));
+    const bubblePadX = Math.round(fontSize * 0.75);
+    const bubblePadY = Math.round(fontSize * 0.6);
+    const lineHeight = Math.round(fontSize * 1.5);
+    const font = `${fontSize}px system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
+    const textColor = "#334155";
+    const sideIndent = Math.max(32, Math.min(96, Math.round(width * 0.08)));
+
+    const userName = resolveProfileName(profile?.userName, DEFAULT_USER_NAME);
+    const gptName = resolveProfileName(profile?.gptName, DEFAULT_GPT_NAME);
+    const userBody = extractTextFromNode(turn.userNode, profile);
+    const assistantBody = turn.assistantNodes
+      .map((n) => extractTextFromNode(n, profile))
+      .filter(Boolean)
+      .join("\n\n");
+    const userText = buildLabeledText(userName, userBody);
+    const assistantText = buildLabeledText(gptName, assistantBody);
+
+    const bubbleWidth = width - padding * 2 - sideIndent;
+    const textMaxWidth = Math.max(10, bubbleWidth - bubblePadX * 2);
+    const measureCanvas = document.createElement("canvas");
+    const mctx = measureCanvas.getContext("2d");
+    mctx.font = font;
+
+    const userLines = wrapTextLines(mctx, userText, textMaxWidth);
+    const assistantLines = wrapTextLines(mctx, assistantText, textMaxWidth);
+
+    const userHeight = Math.max(lineHeight, userLines.length * lineHeight) + bubblePadY * 2;
+    const assistantHeight = Math.max(lineHeight, assistantLines.length * lineHeight) + bubblePadY * 2;
+    const totalHeight = padding + userHeight + gap + assistantHeight + padding;
+
+    const scale = Number(profile.scale || 2);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(width * scale);
+    canvas.height = Math.ceil(totalHeight * scale);
+    const ctx = canvas.getContext("2d");
+    ctx.scale(Number.isFinite(scale) ? scale : 2, Number.isFinite(scale) ? scale : 2);
+
+    ctx.fillStyle = String(profile.themeColor || "#0b1220");
+    ctx.fillRect(0, 0, width, totalHeight);
+    ctx.font = font;
+    ctx.textBaseline = "top";
+
+    let y = padding;
+    const userX = padding;
+    const gptX = padding + sideIndent;
+
+    drawRoundedRect(ctx, userX, y, bubbleWidth, userHeight, 12, theme.userBg);
+    let textY = y + bubblePadY;
+    ctx.fillStyle = textColor;
+    for (const line of userLines) {
+      ctx.fillText(line, userX + bubblePadX, textY);
+      textY += lineHeight;
+    }
+
+    y += userHeight + gap;
+    drawRoundedRect(ctx, gptX, y, bubbleWidth, assistantHeight, 12, theme.gptBg);
+    textY = y + bubblePadY;
+    ctx.fillStyle = textColor;
+    for (const line of assistantLines) {
+      ctx.fillText(line, gptX + bubblePadX, textY);
+      textY += lineHeight;
+    }
+
+    const blob = await canvasToBlob(canvas);
+    return await blob.arrayBuffer();
+  }
+
   async function renderTurnToPngBufferInternal(turn, profile, options) {
     const { sandbox, card } = buildRenderCard(turn, profile, options);
     try {
@@ -514,8 +736,15 @@
       return await renderTurnToPngBufferInternal(turn, profile, { stripMedia: false, stripBackgrounds: false });
     } catch (err) {
       if (!isInsecureOperationError(err)) throw err;
-      state.fallbackCount++;
-      return await renderTurnToPngBufferInternal(turn, profile, { stripMedia: true, stripBackgrounds: true });
+      try {
+        const buf = await renderTurnToPngBufferInternal(turn, profile, { stripMedia: true, stripBackgrounds: true });
+        state.fallbackCount++;
+        return buf;
+      } catch (err2) {
+        if (!isInsecureOperationError(err2)) throw err2;
+        state.textFallbackCount++;
+        return await renderTurnToTextPngBuffer(turn, profile);
+      }
     }
   }
 })();
