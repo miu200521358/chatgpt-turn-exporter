@@ -15,7 +15,8 @@
     viewerReadyResolvers: new Map(),
     selectionEnabled: false,
     lastSyncAt: 0,
-    syncScheduled: false
+    syncScheduled: false,
+    fallbackCount: 0
   };
 
   document.documentElement.classList.add("cgexport-selection-off");
@@ -56,7 +57,8 @@
     const defaultProfile = {
       id: "default",
       name: "デフォルト",
-      maskPairs: [],
+      maskWords: [],
+      maskCaseInsensitive: false,
       themeColor: "#0b1220",
       widthPx: 980,
       paddingPx: 24,
@@ -294,6 +296,7 @@
       return;
     }
 
+    state.fallbackCount = 0;
     setMeta(`表示タブを開いています… (${selected.length}件)`);
     const { sessionId } = await browser.runtime.sendMessage({ type: "cgexport_open_viewer" });
 
@@ -314,7 +317,11 @@
     }
 
     await browser.runtime.sendMessage({ type: "cgexport_export_done", sessionId });
-    setMeta(`完了: ${selected.length}件`);
+    if (state.fallbackCount > 0) {
+      setMeta(`完了: ${selected.length}件（${state.fallbackCount}件は画像/背景を除外）`);
+    } else {
+      setMeta(`完了: ${selected.length}件`);
+    }
   }
 
   function buildFileName(profile, index) {
@@ -356,49 +363,18 @@
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
+  function getMaskWords(profile) {
+    const words = Array.isArray(profile?.maskWords) ? profile.maskWords : [];
+    if (words.length > 0) {
+      return words.map((w) => String(w ?? "").trim()).filter(Boolean);
+    }
+
+    const pairs = Array.isArray(profile?.maskPairs) ? profile.maskPairs : [];
+    return pairs.map((p) => String(p?.from ?? "").trim()).filter(Boolean);
+  }
+
   function applyMask(root, profile) {
-    const pairs = normalizeMaskPairs(profile);
-    if (pairs.length > 0) {
-      applyMaskPairs(root, pairs, !!profile?.maskCaseInsensitive);
-      return;
-    }
-
-    applyMaskLegacy(root, profile);
-  }
-
-  function normalizeMaskPairs(profile) {
-    const raw = Array.isArray(profile?.maskPairs) ? profile.maskPairs : [];
-    return raw
-      .map((p) => ({
-        from: String(p?.from ?? "").trim(),
-        to: String(p?.to ?? "")
-      }))
-      .filter((p) => p.from.length > 0);
-  }
-
-  function applyMaskPairs(root, pairs, caseInsensitive) {
-    const flags = caseInsensitive ? "gi" : "g";
-    const rules = pairs.map((p) => ({
-      from: p.from,
-      to: p.to,
-      re: new RegExp(escapeRegExp(p.from), flags)
-    }));
-
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    const nodes = [];
-    while (walker.nextNode()) nodes.push(walker.currentNode);
-
-    for (const textNode of nodes) {
-      let v = textNode.nodeValue || "";
-      for (const r of rules) {
-        v = v.replace(r.re, r.to);
-      }
-      textNode.nodeValue = v;
-    }
-  }
-
-  function applyMaskLegacy(root, profile) {
-    const list = (profile?.maskWords || []).map((w) => String(w).trim()).filter(Boolean);
+    const list = getMaskWords(profile);
     if (list.length === 0) return;
 
     const flags = profile?.maskCaseInsensitive ? "gi" : "g";
@@ -447,7 +423,17 @@
     root.querySelectorAll("#cgexport-panel").forEach((n) => n.remove());
   }
 
-  async function renderTurnToPngBuffer(turn, profile) {
+  function stripMediaElements(root) {
+    root.querySelectorAll("img, video, svg, canvas, iframe, object, embed, audio, picture, source").forEach((n) => n.remove());
+  }
+
+  function stripBackgroundImages(root) {
+    root.querySelectorAll("*").forEach((el) => {
+      el.style.backgroundImage = "none";
+    });
+  }
+
+  function buildRenderCard(turn, profile, options) {
     const sandbox = getSandbox();
 
     const card = document.createElement("div");
@@ -469,23 +455,67 @@
     applyMask(userClone, profile);
     applyMask(assistantWrap, profile);
 
+    if (options?.stripMedia) {
+      stripMediaElements(userClone);
+      stripMediaElements(assistantWrap);
+    }
+    if (options?.stripBackgrounds) {
+      stripBackgroundImages(userClone);
+      stripBackgroundImages(assistantWrap);
+    }
+
     card.appendChild(userClone);
     card.appendChild(assistantWrap);
     sandbox.appendChild(card);
+    return { sandbox, card };
+  }
 
-    await waitImagesLoaded(card);
+  function isInsecureOperationError(err) {
+    const msg = String(err?.message ?? err ?? "");
+    return msg.includes("The operation is insecure") || msg.includes("SecurityError") || msg.includes("tainted");
+  }
 
-    const scale = Number(profile.scale || 2);
-    const canvas = await html2canvas(card, {
-      backgroundColor: null,
-      scale: Number.isFinite(scale) ? scale : 2,
-      useCORS: true
+  function canvasToBlob(canvas) {
+    return new Promise((resolve, reject) => {
+      try {
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error("PNG変換に失敗しました"));
+        }, "image/png");
+      } catch (err) {
+        reject(err);
+      }
     });
+  }
 
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-    const buf = await blob.arrayBuffer();
+  async function renderTurnToPngBufferInternal(turn, profile, options) {
+    const { sandbox, card } = buildRenderCard(turn, profile, options);
+    try {
+      if (!options?.stripMedia) {
+        await waitImagesLoaded(card);
+      }
 
-    sandbox.removeChild(card);
-    return buf;
+      const scale = Number(profile.scale || 2);
+      const canvas = await html2canvas(card, {
+        backgroundColor: null,
+        scale: Number.isFinite(scale) ? scale : 2,
+        useCORS: true
+      });
+
+      const blob = await canvasToBlob(canvas);
+      return await blob.arrayBuffer();
+    } finally {
+      if (card.parentNode === sandbox) sandbox.removeChild(card);
+    }
+  }
+
+  async function renderTurnToPngBuffer(turn, profile) {
+    try {
+      return await renderTurnToPngBufferInternal(turn, profile, { stripMedia: false, stripBackgrounds: false });
+    } catch (err) {
+      if (!isInsecureOperationError(err)) throw err;
+      state.fallbackCount++;
+      return await renderTurnToPngBufferInternal(turn, profile, { stripMedia: true, stripBackgrounds: true });
+    }
   }
 })();

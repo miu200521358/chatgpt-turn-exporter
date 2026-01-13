@@ -15,8 +15,8 @@
     widthPx: document.getElementById("widthPx"),
     paddingPx: document.getElementById("paddingPx"),
     scale: document.getElementById("scale"),
-    maskPairs: document.getElementById("maskPairs"),
-    maskAdd: document.getElementById("maskAdd")
+    maskCaseInsensitive: document.getElementById("maskCaseInsensitive"),
+    maskWords: document.getElementById("maskWords")
   };
 
   let profiles = [];
@@ -65,9 +65,6 @@
       loadToEditor(profiles.find((p) => p.id === activeId) || profiles[0]);
     });
 
-    els.maskAdd.addEventListener("click", () => {
-      addMaskRow("", "");
-    });
   }
 
   async function load() {
@@ -122,7 +119,8 @@
     els.widthPx.value = p.widthPx ?? 980;
     els.paddingPx.value = p.paddingPx ?? 24;
     els.scale.value = p.scale ?? 2;
-    renderMaskPairs(getMaskPairsForEditor(p));
+    els.maskCaseInsensitive.checked = !!p.maskCaseInsensitive;
+    els.maskWords.value = getMaskWordsForEditor(p).join("\n");
   }
 
   function readFromEditor() {
@@ -133,7 +131,11 @@
       widthPx: Number(els.widthPx.value || 980),
       paddingPx: Number(els.paddingPx.value || 24),
       scale: Number(els.scale.value || 2),
-      maskPairs: readMaskPairs()
+      maskCaseInsensitive: !!els.maskCaseInsensitive.checked,
+      maskWords: els.maskWords.value
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean)
     };
   }
 
@@ -142,7 +144,8 @@
     return {
       id,
       name: `プロファイル ${profiles.length + 1}`,
-      maskPairs: [],
+      maskWords: [],
+      maskCaseInsensitive: false,
       themeColor: "#0b1220",
       widthPx: 980,
       paddingPx: 24,
@@ -150,61 +153,11 @@
     };
   }
 
-  function getMaskPairsForEditor(p) {
+  function getMaskWordsForEditor(p) {
+    const words = Array.isArray(p.maskWords) ? p.maskWords : [];
+    if (words.length > 0) return words.map((w) => String(w ?? "").trim()).filter(Boolean);
+
     const pairs = Array.isArray(p.maskPairs) ? p.maskPairs : [];
-    if (pairs.length > 0) return pairs;
-
-    const legacy = Array.isArray(p.maskWords) ? p.maskWords : [];
-    return legacy.map((w) => {
-      const from = String(w ?? "").trim();
-      return { from, to: "*".repeat(from.length) };
-    });
-  }
-
-  function renderMaskPairs(pairs) {
-    els.maskPairs.innerHTML = "";
-    const list = Array.isArray(pairs) ? pairs : [];
-    if (list.length === 0) {
-      addMaskRow("", "");
-      return;
-    }
-    list.forEach((p) => addMaskRow(p.from ?? "", p.to ?? ""));
-  }
-
-  function addMaskRow(from, to) {
-    const row = document.createElement("div");
-    row.className = "mask-row";
-
-    const fromInput = document.createElement("input");
-    fromInput.type = "text";
-    fromInput.className = "mask-from";
-    fromInput.value = from;
-
-    const toInput = document.createElement("input");
-    toInput.type = "text";
-    toInput.className = "mask-to";
-    toInput.value = to;
-
-    const del = document.createElement("button");
-    del.type = "button";
-    del.textContent = "削除";
-    del.addEventListener("click", () => row.remove());
-
-    row.appendChild(fromInput);
-    row.appendChild(toInput);
-    row.appendChild(del);
-
-    els.maskPairs.appendChild(row);
-  }
-
-  function readMaskPairs() {
-    const rows = Array.from(els.maskPairs.querySelectorAll(".mask-row"));
-    return rows
-      .map((row) => {
-        const from = row.querySelector(".mask-from")?.value ?? "";
-        const to = row.querySelector(".mask-to")?.value ?? "";
-        return { from: String(from).trim(), to: String(to) };
-      })
-      .filter((p) => p.from.length > 0);
+    return pairs.map((pair) => String(pair?.from ?? "").trim()).filter(Boolean);
   }
 })();

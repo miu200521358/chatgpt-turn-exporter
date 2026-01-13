@@ -2,7 +2,7 @@
   "manifest_version": 2,
   "name": "ChatGPT ターン書き出し（PNG）",
   "version": "0.1.0",
-  "description": "選択したChatGPTのターン（ユーザー＋アシスタント）をPNG画像として一覧タブに表示します。",
+  "description": "Android版Firefox向け。選択したChatGPTのターン（ユーザー＋アシスタント）をPNG画像として一覧タブに表示します。",
   "permissions": [
     "storage",
     "tabs",

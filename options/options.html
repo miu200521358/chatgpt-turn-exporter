@@ -48,18 +48,15 @@
         <input id="scale" type="number" min="1" max="4" step="0.25" />
       </label>
 
-      <div class="mask-block">
-        <div class="mask-title">マスク設定</div>
-        <div class="mask-head">
-          <div>指定文字</div>
-          <div>変換後文字</div>
-          <div></div>
-        </div>
-        <div id="maskPairs" class="mask-list"></div>
-        <div class="row">
-          <button type="button" id="maskAdd">行を追加</button>
-        </div>
-      </div>
+      <label class="check">
+        <input id="maskCaseInsensitive" type="checkbox" />
+        大文字小文字を区別しない
+      </label>
+
+      <label>
+        マスク対象（1行=1ワード）
+        <textarea id="maskWords" rows="6"></textarea>
+      </label>
 
       <div class="row">
         <button type="submit">保存</button>
