@@ -384,7 +384,7 @@
 
   function buildFileName(index) {
     const stamp = state.requestTimestamp || formatRequestTimestamp(new Date());
-    return `${stamp}_${index}.png`;
+    return `${stamp}_${String(index).padStart(2, "0")}.png`;
   }
 
   function waitForViewerReady(sessionId, timeoutMs = 15000) {
@@ -642,7 +642,7 @@
     const width = Number(profile.widthPx || 980);
     const padding = Number(profile.paddingPx || 24);
     const gap = 12;
-    const fontSize = Math.max(15, Math.min(18, Math.round(width * 0.047)));
+    const fontSize = Math.max(14, Math.min(17, Math.round(width * 0.042)));
     const bubblePadX = Math.round(fontSize * 0.75);
     const bubblePadY = Math.round(fontSize * 0.6);
     const lineHeight = Math.round(fontSize * 1.5);
@@ -686,8 +686,8 @@
     ctx.textBaseline = "top";
 
     let y = padding;
-    const userX = padding;
-    const gptX = padding + sideIndent;
+    const userX = padding + sideIndent;
+    const gptX = padding;
 
     drawRoundedRect(ctx, userX, y, bubbleWidth, userHeight, 12, theme.userBg);
     let textY = y + bubblePadY;
