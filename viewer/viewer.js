@@ -9,12 +9,18 @@
   let count = 0;
 
   (async () => {
+    let tabId = null;
     try {
       const tab = await browser.tabs.getCurrent();
+      tabId = tab?.id ?? null;
+    } catch {
+      // ignore
+    }
+    try {
       await browser.runtime.sendMessage({
         type: "cgexport_viewer_ready",
         sessionId,
-        tabId: tab?.id ?? null
+        tabId
       });
     } catch {
       // ignore
