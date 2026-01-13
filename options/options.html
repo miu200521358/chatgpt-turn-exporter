@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ChatGPT ターン書き出し 設定</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <h1>プロファイル</h1>
+
+  <section class="list">
+    <div class="row">
+      <button id="add">プロファイル追加</button>
+    </div>
+    <div id="profiles"></div>
+  </section>
+
+  <hr />
+
+  <section class="editor">
+    <h2>編集</h2>
+    <form id="form">
+      <input type="hidden" id="id" />
+
+      <label>
+        名前
+        <input id="name" required />
+      </label>
+
+      <label>
+        背景色
+        <input id="themeColor" type="color" />
+      </label>
+
+      <label>
+        出力幅（px）
+        <input id="widthPx" type="number" min="320" max="2000" step="10" />
+      </label>
+
+      <label>
+        余白（px）
+        <input id="paddingPx" type="number" min="0" max="200" step="1" />
+      </label>
+
+      <label>
+        倍率（html2canvas）
+        <input id="scale" type="number" min="1" max="4" step="0.25" />
+      </label>
+
+      <div class="mask-block">
+        <div class="mask-title">マスク設定</div>
+        <div class="mask-head">
+          <div>指定文字</div>
+          <div>変換後文字</div>
+          <div></div>
+        </div>
+        <div id="maskPairs" class="mask-list"></div>
+        <div class="row">
+          <button type="button" id="maskAdd">行を追加</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <button type="submit">保存</button>
+        <button type="button" id="del">削除</button>
+      </div>
+    </form>
+  </section>
+
+  <script src="options.js"></script>
+</body>
+</html>

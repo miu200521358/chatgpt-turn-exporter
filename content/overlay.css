@@ -1,0 +1,83 @@
+/* UI overlay for selection (mobile-first, compact). */
+
+:root.cgexport-selection-off .cgexport-turn-control {
+  display: none !important;
+}
+
+#cgexport-panel {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 2147483647;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  width: min(92vw, 320px);
+}
+
+#cgexport-panel .cgexport-card {
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  border-radius: 14px;
+  padding: 10px 10px 8px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  backdrop-filter: blur(8px);
+}
+
+#cgexport-panel .row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+#cgexport-panel select,
+#cgexport-panel button {
+  font-size: 13px;
+}
+
+#cgexport-panel select {
+  flex: 1;
+  border-radius: 10px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.10);
+  color: #fff;
+}
+
+#cgexport-panel button {
+  border-radius: 10px;
+  padding: 6px 10px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.10);
+  color: #fff;
+}
+
+#cgexport-panel button.primary {
+  background: rgba(59, 130, 246, 0.75);
+  border-color: rgba(59, 130, 246, 0.95);
+}
+
+#cgexport-panel .meta {
+  font-size: 12px;
+  opacity: 0.9;
+  line-height: 1.35;
+}
+
+.cgexport-turn-control {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 9999;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 8px 2px 6px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  font-size: 12px;
+}
+
+.cgexport-turn-control input {
+  width: 16px;
+  height: 16px;
+}
