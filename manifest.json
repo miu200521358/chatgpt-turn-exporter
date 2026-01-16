@@ -10,7 +10,9 @@
     "https://chat.openai.com/*"
   ],
   "background": {
-    "scripts": ["background.js"]
+    "scripts": [
+      "background.js"
+    ]
   },
   "options_ui": {
     "page": "options/options.html",
@@ -18,18 +20,28 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*"
+      ],
       "js": [
         "content/vendor/html2canvas.min.js",
         "content/content_script.js"
       ],
-      "css": ["content/overlay.css"],
+      "css": [
+        "content/overlay.css"
+      ],
       "run_at": "document_idle"
     }
   ],
   "browser_specific_settings": {
     "gecko": {
-      "id": "chatgpt-turn-exporter@example.com"
+      "id": "chatgpt-turn-exporter@example.com",
+      "data_collection_permissions": {
+        "data_types": [],
+        "purposes": [],
+        "required": ["none"]
+      }
     }
   }
 }
