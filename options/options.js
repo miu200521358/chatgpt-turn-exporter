@@ -67,7 +67,8 @@
     paddingPx: document.getElementById("paddingPx"),
     scale: document.getElementById("scale"),
     maskCaseInsensitive: document.getElementById("maskCaseInsensitive"),
-    maskWords: document.getElementById("maskWords")
+    maskPairs: document.getElementById("maskPairs"),
+    maskAdd: document.getElementById("maskAdd")
   };
 
   let profiles = [];
@@ -117,6 +118,11 @@
       loadToEditor(profiles.find((p) => p.id === activeId) || profiles[0]);
     });
 
+    if (els.maskAdd) {
+      els.maskAdd.addEventListener("click", () => {
+        addMaskRow("", "");
+      });
+    }
   }
 
   async function load() {
@@ -181,7 +187,7 @@
     els.paddingPx.value = p.paddingPx ?? 24;
     els.scale.value = p.scale ?? 2;
     els.maskCaseInsensitive.checked = !!p.maskCaseInsensitive;
-    els.maskWords.value = getMaskWordsForEditor(p).join("\n");
+    renderMaskPairs(getMaskPairsForEditor(p));
   }
 
   function readFromEditor() {
@@ -198,10 +204,7 @@
       paddingPx: Number(els.paddingPx.value || 24),
       scale: Number(els.scale.value || 2),
       maskCaseInsensitive: !!els.maskCaseInsensitive.checked,
-      maskWords: els.maskWords.value
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean)
+      maskPairs: readMaskPairs()
     };
   }
 
@@ -210,7 +213,7 @@
     return {
       id,
       name: `プロファイル ${profiles.length + 1}`,
-      maskWords: [],
+      maskPairs: [],
       maskCaseInsensitive: false,
       themeColor: "#0b1220",
       themeId: DEFAULT_THEME_ID,
@@ -239,11 +242,66 @@
     }
   }
 
-  function getMaskWordsForEditor(p) {
-    const words = Array.isArray(p.maskWords) ? p.maskWords : [];
-    if (words.length > 0) return words.map((w) => String(w ?? "").trim()).filter(Boolean);
-
+  function getMaskPairsForEditor(p) {
     const pairs = Array.isArray(p.maskPairs) ? p.maskPairs : [];
-    return pairs.map((pair) => String(pair?.from ?? "").trim()).filter(Boolean);
+    if (pairs.length > 0) {
+      return pairs.map((pair) => ({
+        from: String(pair?.from ?? "").trim(),
+        to: String(pair?.to ?? "")
+      }));
+    }
+
+    const words = Array.isArray(p.maskWords) ? p.maskWords : [];
+    return words
+      .map((w) => {
+        const from = String(w ?? "").trim();
+        return { from, to: "*".repeat(from.length) };
+      })
+      .filter((pair) => pair.from.length > 0);
+  }
+
+  function renderMaskPairs(pairs) {
+    if (!els.maskPairs) return;
+    els.maskPairs.innerHTML = "";
+    const list = Array.isArray(pairs) ? pairs : [];
+    const rows = list.length >= 2 ? list : list.concat(Array.from({ length: 2 - list.length }, () => ({ from: "", to: "" })));
+    rows.forEach((pair) => addMaskRow(pair.from ?? "", pair.to ?? ""));
+  }
+
+  function addMaskRow(from, to) {
+    if (!els.maskPairs) return;
+    const row = document.createElement("div");
+    row.className = "mask-row";
+
+    const fromInput = document.createElement("input");
+    fromInput.type = "text";
+    fromInput.className = "mask-from";
+    fromInput.value = from;
+
+    const arrow = document.createElement("div");
+    arrow.className = "mask-arrow";
+    arrow.textContent = "→";
+
+    const toInput = document.createElement("input");
+    toInput.type = "text";
+    toInput.className = "mask-to";
+    toInput.value = to;
+
+    row.appendChild(fromInput);
+    row.appendChild(arrow);
+    row.appendChild(toInput);
+    els.maskPairs.appendChild(row);
+  }
+
+  function readMaskPairs() {
+    if (!els.maskPairs) return [];
+    const rows = Array.from(els.maskPairs.querySelectorAll(".mask-row"));
+    return rows
+      .map((row) => {
+        const from = row.querySelector(".mask-from")?.value ?? "";
+        const to = row.querySelector(".mask-to")?.value ?? "";
+        return { from: String(from).trim(), to: String(to) };
+      })
+      .filter((pair) => pair.from.length > 0);
   }
 })();

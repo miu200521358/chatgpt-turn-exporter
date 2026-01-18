@@ -100,14 +100,14 @@
     const defaultProfile = {
       id: "default",
       name: "デフォルト",
-      maskWords: [],
+      maskPairs: [],
       maskCaseInsensitive: false,
       themeColor: "#0b1220",
       themeId: DEFAULT_THEME_ID,
       userName: DEFAULT_USER_NAME,
       gptName: DEFAULT_GPT_NAME,
-      widthPx: 360,
-      paddingPx: 24,
+      widthPx: 450,
+      paddingPx: 12,
       scale: 2
     };
 
@@ -421,24 +421,34 @@
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
-  function getMaskWords(profile) {
-    const words = Array.isArray(profile?.maskWords) ? profile.maskWords : [];
-    if (words.length > 0) {
-      return words.map((w) => String(w ?? "").trim()).filter(Boolean);
-    }
+  function getMaskPairs(profile) {
+    const rawPairs = Array.isArray(profile?.maskPairs) ? profile.maskPairs : [];
+    const pairs = rawPairs
+      .map((p) => ({
+        from: String(p?.from ?? "").trim(),
+        to: String(p?.to ?? "")
+      }))
+      .filter((p) => p.from.length > 0);
+    if (pairs.length > 0) return pairs;
 
-    const pairs = Array.isArray(profile?.maskPairs) ? profile.maskPairs : [];
-    return pairs.map((p) => String(p?.from ?? "").trim()).filter(Boolean);
+    const words = Array.isArray(profile?.maskWords) ? profile.maskWords : [];
+    return words
+      .map((w) => {
+        const from = String(w ?? "").trim();
+        return { from, to: "*".repeat(from.length) };
+      })
+      .filter((p) => p.from.length > 0);
   }
 
   function applyMask(root, profile) {
-    const list = getMaskWords(profile);
-    if (list.length === 0) return;
+    const pairs = getMaskPairs(profile);
+    if (pairs.length === 0) return;
 
     const flags = profile?.maskCaseInsensitive ? "gi" : "g";
-    const rules = list.map((w) => ({
-      w,
-      re: new RegExp(escapeRegExp(w), flags)
+    const rules = pairs.map((p) => ({
+      from: p.from,
+      to: String(p.to ?? ""),
+      re: new RegExp(escapeRegExp(p.from), flags)
     }));
 
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -448,7 +458,7 @@
     for (const textNode of nodes) {
       let v = textNode.nodeValue || "";
       for (const r of rules) {
-        v = v.replace(r.re, "*".repeat(r.w.length));
+        v = v.replace(r.re, () => r.to);
       }
       textNode.nodeValue = v;
     }
@@ -485,11 +495,163 @@
     sandbox.appendChild(clone);
     let text = "";
     try {
-      text = clone.innerText || clone.textContent || "";
+      text = domToMarkdown(clone);
     } finally {
       if (clone.parentNode === sandbox) sandbox.removeChild(clone);
     }
     return String(text).trim();
+  }
+
+  function domToMarkdown(root) {
+    const lines = [];
+    const blockTags = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "blockquote", "pre"]);
+
+    const pushLine = (line) => {
+      lines.push(String(line ?? ""));
+    };
+
+    const pushBlank = () => {
+      if (lines.length === 0) return;
+      if (lines[lines.length - 1] !== "") lines.push("");
+    };
+
+    const hasBlockChild = (el) => {
+      return Array.from(el.children || []).some((child) => blockTags.has(child.tagName.toLowerCase()));
+    };
+
+    const inlineText = (node) => {
+      if (!node) return "";
+      if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || "";
+      if (node.nodeType !== Node.ELEMENT_NODE) return "";
+      const tag = node.tagName.toLowerCase();
+      if (tag === "br") return "\n";
+      const content = Array.from(node.childNodes).map(inlineText).join("");
+      if (tag === "strong" || tag === "b") return `**${content}**`;
+      if (tag === "em" || tag === "i") return `*${content}*`;
+      if (tag === "code") return `\`${content}\``;
+      return content;
+    };
+
+    const normalizeInline = (text) => {
+      return String(text || "")
+        .replace(/\r/g, "")
+        .replace(/[ \t]+/g, " ")
+        .replace(/\s*\n\s*/g, "\n")
+        .trim();
+    };
+
+    const processList = (listEl, depth) => {
+      const ordered = listEl.tagName.toLowerCase() === "ol";
+      let index = 1;
+      for (const child of Array.from(listEl.children)) {
+        if (child.tagName && child.tagName.toLowerCase() === "li") {
+          processListItem(child, depth, ordered, index);
+          if (ordered) index += 1;
+        }
+      }
+      pushBlank();
+    };
+
+    const processListItem = (liEl, depth, ordered, index) => {
+      const indent = " ".repeat(depth * 2);
+      const liClone = liEl.cloneNode(true);
+      liClone.querySelectorAll("ul, ol").forEach((n) => n.remove());
+      const text = normalizeInline(inlineText(liClone)).replace(/\n/g, " ");
+      if (text.length > 0) {
+        const prefix = ordered ? `${index}. ` : "- ";
+        pushLine(`${indent}${prefix}${text}`);
+      }
+      for (const child of Array.from(liEl.children)) {
+        const tag = child.tagName?.toLowerCase();
+        if (tag === "ul" || tag === "ol") processList(child, depth + 1);
+      }
+    };
+
+    const processBlockquote = (el) => {
+      const innerLines = [];
+      const originalLines = lines.slice(0);
+      lines.length = 0;
+      processChildren(el);
+      innerLines.push(...lines);
+      lines.length = 0;
+      lines.push(...originalLines);
+      for (const line of innerLines) {
+        if (line === "") {
+          pushLine("");
+        } else {
+          pushLine(`> ${line}`);
+        }
+      }
+      pushBlank();
+    };
+
+    const processPre = (el) => {
+      const code = el.textContent || "";
+      pushLine("```");
+      code.replace(/\r/g, "").split("\n").forEach((line) => pushLine(line));
+      pushLine("```");
+      pushBlank();
+    };
+
+    const processParagraph = (el) => {
+      const text = normalizeInline(inlineText(el));
+      if (text.length === 0) return;
+      text.split("\n").forEach((line) => pushLine(line));
+      pushBlank();
+    };
+
+    const processHeading = (el, level) => {
+      const text = normalizeInline(inlineText(el));
+      if (text.length === 0) return;
+      pushLine(`${"#".repeat(level)} ${text}`);
+      pushBlank();
+    };
+
+    const processNode = (node) => {
+      if (!node) return;
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = normalizeInline(node.nodeValue || "");
+        if (text.length > 0) {
+          pushLine(text);
+          pushBlank();
+        }
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+      const tag = node.tagName.toLowerCase();
+      if (tag === "p") return processParagraph(node);
+      if (tag === "pre") return processPre(node);
+      if (tag === "blockquote") return processBlockquote(node);
+      if (tag === "ul" || tag === "ol") return processList(node, 0);
+      if (tag === "li") return processListItem(node, 0, false, 1);
+      if (tag === "h1") return processHeading(node, 1);
+      if (tag === "h2") return processHeading(node, 2);
+      if (tag === "h3") return processHeading(node, 3);
+      if (tag === "h4") return processHeading(node, 4);
+      if (tag === "h5") return processHeading(node, 5);
+      if (tag === "h6") return processHeading(node, 6);
+
+      if (hasBlockChild(node)) {
+        processChildren(node);
+        return;
+      }
+
+      const text = normalizeInline(inlineText(node));
+      if (text.length > 0) {
+        pushLine(text);
+        pushBlank();
+      }
+    };
+
+    const processChildren = (node) => {
+      for (const child of Array.from(node.childNodes || [])) {
+        processNode(child);
+      }
+    };
+
+    processChildren(root);
+    return lines.join("\n").trim();
   }
 
   function measureTextWidth(ctx, text, style) {

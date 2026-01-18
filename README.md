@@ -21,3 +21,15 @@ Export selected ChatGPT turns (user + assistant) into a viewer tab as 1-turn-per
 2. Transfer the `.xpi` to the device via USB.
 3. Use Firefox for Android's debug menu "Install add-on from file".
 4. Some environments require AMO unlisted signing.
+
+## 実機デバッグ
+
+1. Firefox で USB デバッグを有効化
+   - 設定 > Firefoxについて > ビルド番号を7回タップ > 開発者向けオプション > USBデバッグを有効化
+2. Windows 側で下記コマンド
+
+```
+web-ext run --target=firefox-android --android-device 57191FDCH005BG --adb-remove-old-artifacts
+```
+
+

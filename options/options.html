@@ -68,10 +68,18 @@
         大文字小文字を区別しない
       </label>
 
-      <label>
-        マスク対象（1行=1ワード）
-        <textarea id="maskWords" rows="6"></textarea>
-      </label>
+      <div class="mask-block">
+        <div class="mask-title">マスク置換</div>
+        <div class="mask-head">
+          <div>置換対象文字</div>
+          <div class="mask-arrow">→</div>
+          <div>置換結果文字</div>
+        </div>
+        <div id="maskPairs" class="mask-list"></div>
+        <div class="row">
+          <button type="button" id="maskAdd">行を追加</button>
+        </div>
+      </div>
 
       <div class="row">
         <button type="submit">保存</button>
