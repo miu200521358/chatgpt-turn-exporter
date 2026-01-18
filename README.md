@@ -32,4 +32,19 @@ Export selected ChatGPT turns (user + assistant) into a viewer tab as 1-turn-per
 web-ext run --target=firefox-android --android-device 57191FDCH005BG --adb-remove-old-artifacts
 ```
 
+## 提出
 
+1. XPIをビルド
+
+```
+cd chatgpt-turn-exporter
+web-ext build
+```
+
+2. AMOに未掲載で提出
+   - https://addons.mozilla.org/developers/
+
+3. 審査通過後、XPIをダウンロード
+
+4. Firefox for AndroidでXPIをインストール
+   - デバッグメニュー > ファイルからアドオンをインストール

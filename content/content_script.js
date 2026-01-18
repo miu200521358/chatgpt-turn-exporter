@@ -504,7 +504,8 @@
 
   function domToMarkdown(root) {
     const lines = [];
-    const blockTags = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "blockquote", "pre"]);
+    const blockTags = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "blockquote", "pre", "hr"]);
+    const baseFontSizePx = Number.parseFloat(getComputedStyle(root).fontSize) || 16;
 
     const pushLine = (line) => {
       lines.push(String(line ?? ""));
@@ -515,8 +516,91 @@
       if (lines[lines.length - 1] !== "") lines.push("");
     };
 
+    const isInlineDisplay = (display) => {
+      if (!display) return true;
+      if (display === "contents") return true;
+      return display.startsWith("inline");
+    };
+
+    const isBlockLike = (el) => {
+      if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
+      const display = getComputedStyle(el).display;
+      return !isInlineDisplay(display);
+    };
+
     const hasBlockChild = (el) => {
-      return Array.from(el.children || []).some((child) => blockTags.has(child.tagName.toLowerCase()));
+      return Array.from(el.children || []).some((child) => {
+        const tag = child.tagName?.toLowerCase();
+        if (tag && blockTags.has(tag)) return true;
+        if (isListContainerLike(child) || isListItemLike(child)) return true;
+        if (isHeadingLike(child)) return true;
+        return isBlockLike(child);
+      });
+    };
+
+    const getFontSizePx = (el) => Number.parseFloat(getComputedStyle(el).fontSize) || baseFontSizePx;
+
+    const getFontWeight = (el) => {
+      const weight = Number.parseInt(getComputedStyle(el).fontWeight, 10);
+      return Number.isFinite(weight) ? weight : 400;
+    };
+
+    const isListContainerLike = (el) => {
+      if (!el || !el.tagName) return false;
+      const tag = el.tagName.toLowerCase();
+      if (tag === "ul" || tag === "ol") return true;
+      const role = el.getAttribute("role");
+      return role === "list";
+    };
+
+    const isListItemLike = (el) => {
+      if (!el || !el.tagName) return false;
+      const tag = el.tagName.toLowerCase();
+      if (tag === "li") return true;
+      const role = el.getAttribute("role");
+      if (role === "listitem") return true;
+      const style = getComputedStyle(el);
+      return style.display === "list-item";
+    };
+
+    const getListDepth = (el) => {
+      let depth = 0;
+      let p = el.parentElement;
+      while (p) {
+        if (isListContainerLike(p)) depth += 1;
+        p = p.parentElement;
+      }
+      return depth;
+    };
+
+    const isHeadingLike = (el) => {
+      if (!el || !el.tagName) return false;
+      const tag = el.tagName.toLowerCase();
+      if (tag.startsWith("h")) return true;
+      const role = el.getAttribute("role");
+      if (role === "heading") return true;
+      const text = normalizeInline(inlineText(el));
+      if (!text) return false;
+      const weight = getFontWeight(el);
+      const size = getFontSizePx(el);
+      if (size >= baseFontSizePx * 1.35) return true;
+      if (weight >= 600 && size >= baseFontSizePx * 1.1) return true;
+      return weight >= 600 && text.length <= 40;
+    };
+
+    const headingLevelFor = (el) => {
+      const role = el.getAttribute("role");
+      if (role === "heading") {
+        const raw = el.getAttribute("aria-level");
+        const parsed = Number.parseInt(raw ?? "", 10);
+        if (Number.isFinite(parsed)) return Math.min(6, Math.max(1, parsed));
+      }
+      const size = getFontSizePx(el);
+      const ratio = size / baseFontSizePx;
+      if (ratio >= 1.35) return 1;
+      if (ratio >= 1.25) return 2;
+      if (ratio >= 1.15) return 3;
+      return 4;
     };
 
     const inlineText = (node) => {
@@ -544,8 +628,10 @@
       const ordered = listEl.tagName.toLowerCase() === "ol";
       let index = 1;
       for (const child of Array.from(listEl.children)) {
-        if (child.tagName && child.tagName.toLowerCase() === "li") {
-          processListItem(child, depth, ordered, index);
+        if (isListItemLike(child)) {
+          const tag = child.tagName?.toLowerCase();
+          if (tag === "li") processListItem(child, depth, ordered, index);
+          else processListItemLike(child, depth, true);
           if (ordered) index += 1;
         }
       }
@@ -555,7 +641,7 @@
     const processListItem = (liEl, depth, ordered, index) => {
       const indent = " ".repeat(depth * 2);
       const liClone = liEl.cloneNode(true);
-      liClone.querySelectorAll("ul, ol").forEach((n) => n.remove());
+      liClone.querySelectorAll("ul, ol, [role=\"list\"]").forEach((n) => n.remove());
       const text = normalizeInline(inlineText(liClone)).replace(/\n/g, " ");
       if (text.length > 0) {
         const prefix = ordered ? `${index}. ` : "- ";
@@ -564,7 +650,41 @@
       for (const child of Array.from(liEl.children)) {
         const tag = child.tagName?.toLowerCase();
         if (tag === "ul" || tag === "ol") processList(child, depth + 1);
+        else if (isListContainerLike(child)) processListContainerLike(child, depth + 1);
       }
+    };
+
+    const processListItemLike = (el, depthOverride, suppressBlank) => {
+      const depth = Number.isFinite(depthOverride) ? depthOverride : Math.max(0, getListDepth(el) - 1);
+      const indent = " ".repeat(depth * 2);
+      const liClone = el.cloneNode(true);
+      liClone.querySelectorAll("ul, ol, [role=\"list\"]").forEach((n) => n.remove());
+      const text = normalizeInline(inlineText(liClone)).replace(/\n/g, " ");
+      if (text.length > 0) {
+        pushLine(`${indent}- ${text}`);
+      }
+      for (const child of Array.from(el.children)) {
+        const tag = child.tagName?.toLowerCase();
+        if (tag === "ul" || tag === "ol") processList(child, depth + 1);
+        else if (isListContainerLike(child)) processListContainerLike(child, depth + 1);
+      }
+      if (!suppressBlank) pushBlank();
+    };
+
+    const processListContainerLike = (listEl, depthOverride) => {
+      const depth = Number.isFinite(depthOverride) ? depthOverride : getListDepth(listEl);
+      let didItem = false;
+      for (const child of Array.from(listEl.children)) {
+        if (isListItemLike(child)) {
+          processListItemLike(child, depth, true);
+          didItem = true;
+        } else if (isListContainerLike(child)) {
+          processListContainerLike(child, depth + 1);
+        } else {
+          processNode(child);
+        }
+      }
+      if (didItem) pushBlank();
     };
 
     const processBlockquote = (el) => {
@@ -594,9 +714,20 @@
     };
 
     const processParagraph = (el) => {
-      const text = normalizeInline(inlineText(el));
-      if (text.length === 0) return;
-      text.split("\n").forEach((line) => pushLine(line));
+      const raw = normalizeInline(inlineText(el));
+      if (raw.length === 0) return;
+      if (isHeadingLike(el)) {
+        pushLine(`${"#".repeat(headingLevelFor(el))} ${raw}`);
+        pushBlank();
+        return;
+      }
+      const boldHeading = /^(?:\*\*|__)\s*(.+?)\s*(?:\*\*|__)$/.exec(raw);
+      if (boldHeading && boldHeading[1]) {
+        pushLine(`## ${boldHeading[1]}`);
+        pushBlank();
+        return;
+      }
+      raw.split("\n").forEach((line) => pushLine(line));
       pushBlank();
     };
 
@@ -604,6 +735,13 @@
       const text = normalizeInline(inlineText(el));
       if (text.length === 0) return;
       pushLine(`${"#".repeat(level)} ${text}`);
+      pushBlank();
+    };
+
+    const processHeadingLike = (el) => {
+      const text = normalizeInline(inlineText(el));
+      if (text.length === 0) return;
+      pushLine(`${"#".repeat(headingLevelFor(el))} ${text}`);
       pushBlank();
     };
 
@@ -620,6 +758,8 @@
       if (node.nodeType !== Node.ELEMENT_NODE) return;
 
       const tag = node.tagName.toLowerCase();
+      if (isListItemLike(node) && tag !== "ul" && tag !== "ol") return processListItemLike(node);
+      if (isListContainerLike(node) && tag !== "ul" && tag !== "ol") return processListContainerLike(node);
       if (tag === "p") return processParagraph(node);
       if (tag === "pre") return processPre(node);
       if (tag === "blockquote") return processBlockquote(node);
@@ -632,7 +772,9 @@
       if (tag === "h5") return processHeading(node, 5);
       if (tag === "h6") return processHeading(node, 6);
 
-      if (hasBlockChild(node)) {
+      const hasBlocks = hasBlockChild(node);
+      if (!hasBlocks && isHeadingLike(node)) return processHeadingLike(node);
+      if (hasBlocks) {
         processChildren(node);
         return;
       }
@@ -841,6 +983,23 @@
         continue;
       }
 
+      const boldHeadingMatch = /^(?:\*\*|__)\s*(.+?)\s*(?:\*\*|__)$/.exec(line);
+      if (boldHeadingMatch) {
+        blocks.push({ type: "heading", level: 2, text: boldHeadingMatch[1] });
+        continue;
+      }
+
+      const bulletMatch = /^(\s*)([•・◦▪▫◆◇○●])\s*(.*)$/.exec(line);
+      if (bulletMatch) {
+        blocks.push({
+          type: "list",
+          ordered: false,
+          indent: bulletMatch[1].length,
+          text: bulletMatch[3]
+        });
+        continue;
+      }
+
       const orderedMatch = /^(\s*)(\d+)\.\s+(.*)$/.exec(line);
       if (orderedMatch) {
         blocks.push({
@@ -917,7 +1076,7 @@
     const lines = [];
     const baseStyle = getTextStyle(baseFontSize, "paragraph");
     const baseLineHeight = baseStyle.lineHeight;
-    const listBaseIndent = Math.round(baseFontSize * 0.6);
+    const listBaseIndent = Math.round(baseFontSize * 0.9);
 
     for (const block of blocks) {
       if (block.type === "blank") {
@@ -934,8 +1093,10 @@
       }
 
       if (block.type === "list") {
-        const extraIndent = Math.min(24, (block.indent || 0) * 4);
-        const prefix = block.ordered ? `${block.index}. ` : "- ";
+        const indentSpaces = Number(block.indent || 0);
+        const indentLevel = Math.max(0, Math.floor(indentSpaces / 2));
+        const extraIndent = Math.min(Math.round(baseFontSize * 2.5), indentLevel * Math.round(baseFontSize * 1.1));
+        const prefix = block.ordered ? `${block.index}. ` : "・ ";
         const blockLines = wrapStyledSegments(ctx, segments, maxWidth, listBaseIndent + extraIndent, prefix, style);
         lines.push(...blockLines);
         continue;
