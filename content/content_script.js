@@ -492,39 +492,161 @@
     return String(text).trim();
   }
 
-  function wrapTextLines(ctx, text, maxWidth, baseIndentPx = 0, firstPrefix = "") {
-    const lines = [];
-    const paragraphs = String(text || "").split(/\n/);
-    const prefix = String(firstPrefix || "");
-    const prefixWidth = prefix ? ctx.measureText(prefix).width : 0;
-    const limit = Math.max(10, maxWidth - baseIndentPx - prefixWidth);
+  function measureTextWidth(ctx, text, style) {
+    if (!text) return 0;
+    ctx.font = fontFromStyle(style);
+    return ctx.measureText(text).width;
+  }
 
-    for (const para of paragraphs) {
-      if (para.length === 0) {
-        lines.push({ text: "", indent: baseIndentPx });
+  function mergeInlineSegments(segments) {
+    const merged = [];
+    for (const seg of segments) {
+      if (!seg.text) continue;
+      const prev = merged[merged.length - 1];
+      if (prev && prev.bold === seg.bold && prev.italic === seg.italic) {
+        prev.text += seg.text;
+      } else {
+        merged.push({ ...seg });
+      }
+    }
+    return merged;
+  }
+
+  function parseInlineStyles(text) {
+    const input = String(text || "");
+    const segments = [];
+    let bold = false;
+    let italic = false;
+    let buffer = "";
+
+    function flush() {
+      if (!buffer) return;
+      segments.push({ text: buffer, bold, italic });
+      buffer = "";
+    }
+
+    let i = 0;
+    while (i < input.length) {
+      const ch = input[i];
+      if (ch === "\\" && i + 1 < input.length) {
+        buffer += input[i + 1];
+        i += 2;
         continue;
       }
-
-      let line = "";
-      let isFirstLine = true;
-      for (const ch of para) {
-        const test = line + ch;
-        if (ctx.measureText(test).width > limit && line.length > 0) {
-          lines.push({
-            text: isFirstLine ? prefix + line : line,
-            indent: isFirstLine ? baseIndentPx : baseIndentPx + prefixWidth
-          });
-          line = ch;
-          isFirstLine = false;
-        } else {
-          line = test;
+      if (ch === "*" || ch === "_") {
+        const next = input[i + 1];
+        if (next === ch) {
+          flush();
+          bold = !bold;
+          i += 2;
+          continue;
         }
+        flush();
+        italic = !italic;
+        i += 1;
+        continue;
       }
-      lines.push({
-        text: isFirstLine ? prefix + line : line,
-        indent: isFirstLine ? baseIndentPx : baseIndentPx + prefixWidth
-      });
+      buffer += ch;
+      i += 1;
     }
+    flush();
+    return mergeInlineSegments(segments);
+  }
+
+  function applyInlineStyles(baseStyle, segments) {
+    const styled = segments.map((seg) => {
+      const fontWeight = seg.bold ? "700" : baseStyle.fontWeight;
+      const fontStyle = seg.italic ? "italic" : baseStyle.fontStyle;
+      return {
+        text: seg.text,
+        style: {
+          ...baseStyle,
+          fontWeight,
+          fontStyle
+        }
+      };
+    });
+
+    const merged = [];
+    for (const seg of styled) {
+      if (!seg.text) continue;
+      const prev = merged[merged.length - 1];
+      if (
+        prev &&
+        prev.style.fontSize === seg.style.fontSize &&
+        prev.style.fontWeight === seg.style.fontWeight &&
+        prev.style.fontStyle === seg.style.fontStyle &&
+        prev.style.fontFamily === seg.style.fontFamily
+      ) {
+        prev.text += seg.text;
+      } else {
+        merged.push(seg);
+      }
+    }
+    return merged;
+  }
+
+  function wrapStyledSegments(ctx, segments, maxWidth, baseIndentPx = 0, firstPrefix = "", baseStyle) {
+    const lines = [];
+    const prefix = String(firstPrefix || "");
+    const prefixWidth = prefix ? measureTextWidth(ctx, prefix, baseStyle) : 0;
+    let isFirstLine = true;
+    let lineIndent = baseIndentPx;
+    let lineMaxWidth = Math.max(10, maxWidth - lineIndent);
+    let lineSegments = [];
+    let lineWidth = 0;
+    let lineHeight = baseStyle.lineHeight;
+
+    const startLine = () => {
+      lineSegments = [];
+      lineWidth = 0;
+      lineHeight = baseStyle.lineHeight;
+      lineIndent = isFirstLine ? baseIndentPx : baseIndentPx + prefixWidth;
+      lineMaxWidth = Math.max(10, maxWidth - lineIndent);
+      if (isFirstLine && prefix) {
+        lineSegments.push({ text: prefix, style: baseStyle });
+        lineWidth = prefixWidth;
+      }
+    };
+
+    const pushLine = () => {
+      lines.push({
+        segments: lineSegments,
+        indent: lineIndent,
+        height: lineHeight
+      });
+    };
+
+    startLine();
+
+    for (const seg of segments) {
+      const text = String(seg.text || "");
+      const style = seg.style;
+      for (const ch of text) {
+        const charWidth = measureTextWidth(ctx, ch, style);
+        if (lineWidth + charWidth > lineMaxWidth && lineSegments.length > 0) {
+          pushLine();
+          isFirstLine = false;
+          startLine();
+        }
+        const prev = lineSegments[lineSegments.length - 1];
+        if (
+          prev &&
+          prev.style.fontSize === style.fontSize &&
+          prev.style.fontWeight === style.fontWeight &&
+          prev.style.fontStyle === style.fontStyle &&
+          prev.style.fontFamily === style.fontFamily
+        ) {
+          prev.text += ch;
+        } else {
+          lineSegments.push({ text: ch, style });
+        }
+        lineWidth += charWidth;
+        lineHeight = Math.max(lineHeight, style.lineHeight);
+      }
+    }
+
+    pushLine();
     return lines;
   }
 
@@ -637,36 +759,35 @@
 
     for (const block of blocks) {
       if (block.type === "blank") {
-        lines.push({ text: "", indent: 0, style: baseStyle, height: baseLineHeight });
+        lines.push({ segments: [], indent: 0, height: baseLineHeight });
         continue;
       }
 
       const style = getTextStyle(baseFontSize, block.type, block.level);
-      ctx.font = fontFromStyle(style);
+      let segments = [];
+      if (block.type === "code") {
+        segments = [{ text: block.text, style }];
+      } else {
+        segments = applyInlineStyles(style, parseInlineStyles(block.text));
+      }
 
       if (block.type === "list") {
         const extraIndent = Math.min(24, (block.indent || 0) * 4);
         const prefix = block.ordered ? `${block.index}. ` : "- ";
-        const blockLines = wrapTextLines(ctx, block.text, maxWidth, listBaseIndent + extraIndent, prefix);
-        for (const line of blockLines) {
-          lines.push({ text: line.text, indent: line.indent, style, height: style.lineHeight });
-        }
+        const blockLines = wrapStyledSegments(ctx, segments, maxWidth, listBaseIndent + extraIndent, prefix, style);
+        lines.push(...blockLines);
         continue;
       }
 
       if (block.type === "quote") {
         const prefix = "> ";
-        const blockLines = wrapTextLines(ctx, block.text, maxWidth, listBaseIndent, prefix);
-        for (const line of blockLines) {
-          lines.push({ text: line.text, indent: line.indent, style, height: style.lineHeight });
-        }
+        const blockLines = wrapStyledSegments(ctx, segments, maxWidth, listBaseIndent, prefix, style);
+        lines.push(...blockLines);
         continue;
       }
 
-      const blockLines = wrapTextLines(ctx, block.text, maxWidth);
-      for (const line of blockLines) {
-        lines.push({ text: line.text, indent: line.indent, style, height: style.lineHeight });
-      }
+      const blockLines = wrapStyledSegments(ctx, segments, maxWidth, 0, "", style);
+      lines.push(...blockLines);
     }
 
     const height = lines.reduce((sum, line) => sum + line.height, 0);
@@ -848,13 +969,18 @@
     drawRoundedRect(ctx, userX, y, bubbleWidth, userHeight, 12, theme.userBg);
     let textY = y + bubblePadY;
     for (const line of userLayout.lines) {
-      if (!line.text) {
+      if (!line.segments || line.segments.length === 0) {
         textY += line.height;
         continue;
       }
-      ctx.font = fontFromStyle(line.style);
-      ctx.fillStyle = textColor;
-      ctx.fillText(line.text, userX + bubblePadX + (line.indent || 0), textY);
+      let x = userX + bubblePadX + (line.indent || 0);
+      for (const seg of line.segments) {
+        if (!seg.text) continue;
+        ctx.font = fontFromStyle(seg.style);
+        ctx.fillStyle = textColor;
+        ctx.fillText(seg.text, x, textY);
+        x += measureTextWidth(ctx, seg.text, seg.style);
+      }
       textY += line.height;
     }
 
@@ -862,13 +988,18 @@
     drawRoundedRect(ctx, gptX, y, bubbleWidth, assistantHeight, 12, theme.gptBg);
     textY = y + bubblePadY;
     for (const line of assistantLayout.lines) {
-      if (!line.text) {
+      if (!line.segments || line.segments.length === 0) {
         textY += line.height;
         continue;
       }
-      ctx.font = fontFromStyle(line.style);
-      ctx.fillStyle = textColor;
-      ctx.fillText(line.text, gptX + bubblePadX + (line.indent || 0), textY);
+      let x = gptX + bubblePadX + (line.indent || 0);
+      for (const seg of line.segments) {
+        if (!seg.text) continue;
+        ctx.font = fontFromStyle(seg.style);
+        ctx.fillStyle = textColor;
+        ctx.fillText(seg.text, x, textY);
+        x += measureTextWidth(ctx, seg.text, seg.style);
+      }
       textY += line.height;
     }
 
